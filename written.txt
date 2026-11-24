@@ -1,5 +1,39 @@
-﻿Q3. What happens to the bounding boxes with update + fullRefit?
+Q3. What happens to the bounding boxes with update + fullRefit?
+
+fullRefit only recomputes each box from the circles that are already assigned to that node, so
+the circles never change parent. As they wander, a circle can end up sitting well outside its
+own node's box, and because parent boxes are just the union of their children, the error
+compounds all the way up. Every frame the boxes only grow: they never shrink back when a circle
+moves away, and a child that drifts out to the far side of its parent stretches that parent's box
+to include it. My measurement on the 100-circle scene: total perimeter of the internal boxes is
+3.3x bigger than a freshly built tree after 600 frames, growing steadily (1.0x, 1.7x, 2.3x,
+2.8x, 2.9x, 3.2x, 3.3x at frames 0, 100, ... 600). Bigger boxes overlap more, so fewer subtrees
+get rejected and the ray test visits more circles per pixel. The picture also starts to look
+wrong, because the root box quickly stops matching where the circles actually are. Refitting is
+cheap though - about 0.4 microseconds per frame - so the cost is entirely in the degraded tree,
+not in the repair.
 
 Q4. What happens with reset (rebuild every frame) instead?
 
+The tree is thrown away and rebuilt from the current positions every frame, so the boxes are
+always tight and the tree always reflects the current arrangement. Every internal box in the
+rebuilt tree matches a from-scratch build exactly (I checked this by rebuilding twice and
+comparing every node), and query results matched brute force at every sampled pixel before and
+after the reset. The price is rebuilding: about 81 microseconds per frame in my measurement,
+roughly 200x the cost of a refit. That is still small next to the nearly 800,000 pixel samples
+each frame, which is why the program still runs at a reasonable rate. The real trade-off is that
+reset throws away a structure that was still mostly usable just to correct a drift that, at these
+speeds, is only a few pixels per frame.
+
 Q5. Why are some circles drawn with their sides cut off?
+
+Two separate things cut them off. The first is the window edge: circles are created anywhere in
+[0, width] x [0, height] with a radius up to 20, so a circle whose centre lands within a radius
+of the border is partly outside the image no matter what, and nothing in the ray test can paint
+pixels that are not on the screen. The second, which is the one that shows up once the circles
+move, is that update() just adds the velocity with no walls, so after a while many circles have
+drifted completely past the edge and only a sliver of them, or none, is left in view. In my run
+66 of the 100 circles had crossed the edge after 340 frames, one by as much as 671 pixels. On top
+of both of those, circles overlap and the ray test keeps the colour of the last circle it hits,
+so a circle can also be hidden by one drawn on top of it - that is a circle being covered, not
+cut off, but it looks the same in a still frame.
